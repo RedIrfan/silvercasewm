@@ -163,10 +163,9 @@ int main()
                 break;
         }
 
-        if(ev.type == KeyPress && ev.xkey.window != None)
-            XRaiseWindow(dpy, ev.xkey.window);
-        else if(ev.type == ButtonPress && ev.xbutton.window != None)
+        if(ev.type == ButtonPress && ev.xbutton.window != None)
         {
+            XRaiseWindow(dpy, ev.xkey.window);
             XGetWindowAttributes(dpy, ev.xbutton.window, &attr);
             start = ev.xbutton;
         }
