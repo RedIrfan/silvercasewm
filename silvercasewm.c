@@ -50,13 +50,15 @@ void manage(Window w, XWindowAttributes *wa)
 
     XReparentWindow(dpy, w, frame, 0,0);
     XMapWindow(dpy, frame);
-
+    
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
-    int add_to_index = clients_amount;
+    XSelectInput(dpy, w, SubstructureNotifyMask);
 
+    int add_to_index = clients_amount;
     for (int i=0;i<clients_amount;i++){
         if (clients[i].xid == 0){
-            add_to_index = i;        
+            add_to_index = i;
+            break;
         }
     }
     
@@ -69,8 +71,11 @@ void manage(Window w, XWindowAttributes *wa)
     }
 }
 
-void unmanage(Window w){
-
+void unmanage(int client_index){
+    XDestroyWindow(dpy, (Window) clients[client_index].frame_xid);
+    
+    clients[client_index].xid = 0;
+    clients[client_index].frame_xid = 0;
 }
 
 void scan()
@@ -146,6 +151,13 @@ int main()
                     manage(ev.xcreatewindow.window, &wa);
                 }
                 break;
+            case DestroyNotify:
+                int client_index;
+                puts("destroy notify");
+                printf(" destroy client %d \n", (int) ev.xdestroywindow.event);
+                if ((client_index = getClientIndex(ev.xdestroywindow.event)) > -1){
+                    unmanage(client_index);
+                }
             default:
                 
                 break;
@@ -190,7 +202,7 @@ int getClientIndex(Window client){
     for (unsigned int i=0;i<clients_amount;i++){
         int c_xid = (int) client;
         printf("\n [%d] client xid/frame : %d %d compare to %d \n", i, clients[i].xid, clients[i].frame_xid, c_xid);
-        printf("\n found match : %d \n", clients[i].frame_xid == c_xid);
+        printf("found match : %d \n", clients[i].frame_xid == c_xid);
         if (clients[i].xid == c_xid || clients[i].frame_xid == c_xid)
             return i;
     }
