@@ -6,10 +6,11 @@
 #define ARRAY_SIZE(arr)  (sizeof(arr) / sizeof((arr)[0]))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
-const unsigned int FRAME_OFFSET = 20;
-const unsigned int BORDER_WIDTH = 10;
+const unsigned int FRAME_OFFSET = 30;
+const unsigned int SELECTABLE_OFFSET = 15;
+const unsigned int BORDER_WIDTH = 5;
 const unsigned int BORDER_COLOR = 0xc8ffff;
-const unsigned int BG_COLOR = 0x000000;
+const unsigned int BG_COLOR = 0x00000000;
 const unsigned int BUTTON_WIDTH = 4;
 const unsigned int BUTTON_COLOR = 0xffffff;
 const unsigned int INITIAL_CLIENTS_SIZE = 5;
@@ -19,12 +20,18 @@ typedef struct {
     int frame_xid;
 } Client;
 
+enum ClientColumn{
+    BASEWINDOW,
+    FRAMEWINDOW
+};
+
 static Display *dpy;
 static Window root;
 static Client *clients;
 static int clients_amount = 0;
 
 int getClientIndex(Window client);
+int getClientIndexWithColumnIndex(Window client, int *column_index);
 
 void manage(Window w, XWindowAttributes *wa)
 {
@@ -39,8 +46,8 @@ void manage(Window w, XWindowAttributes *wa)
         root, 
         wa->x,
         wa->y,
-        wa->width,
-        wa->height,
+        wa->width + FRAME_OFFSET,
+        wa->height + FRAME_OFFSET,
         BORDER_WIDTH,
         BORDER_COLOR,
         BG_COLOR
@@ -48,7 +55,7 @@ void manage(Window w, XWindowAttributes *wa)
 
     XAddToSaveSet(dpy, w);
 
-    XReparentWindow(dpy, w, frame, 0,0);
+    XReparentWindow(dpy, w, frame, FRAME_OFFSET/2,FRAME_OFFSET/2);
     XMapWindow(dpy, frame);
     
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
@@ -165,22 +172,26 @@ int main()
 
         if(ev.type == ButtonPress && ev.xbutton.window != None)
         {
-            XRaiseWindow(dpy, ev.xkey.window);
-            XGetWindowAttributes(dpy, ev.xbutton.window, &attr);
-            start = ev.xbutton;
+            int client_index;
+            XWindowAttributes wa;
+            XGetWindowAttributes(dpy, ev.xbutton.window, &wa);
+            if ((client_index = getClientIndex(ev.xbutton.window)) != -1 &&
+                (
+                    ev.xbutton.x <= SELECTABLE_OFFSET||
+                    ev.xbutton.x >= wa.width - SELECTABLE_OFFSET||
+                    ev.xbutton.y <= SELECTABLE_OFFSET||
+                    ev.xbutton.y >= wa.height - SELECTABLE_OFFSET
+                )
+            ){
+                XRaiseWindow(dpy, ev.xbutton.window);
+                XGetWindowAttributes(dpy, ev.xbutton.window, &attr);
+                start = ev.xbutton;
+            }
         }
         else if(ev.type == MotionNotify && start.window != None)
         {
             int xdiff = ev.xbutton.x_root - start.x_root;
             int ydiff = ev.xbutton.y_root - start.y_root;
-            // printf("\n moving : diff: (");
-            // printf("%d", xdiff);
-            // printf(", ");
-            // printf("%d", ydiff);
-            // printf(") | framexy : (");
-            // printf("%d", attr.x);
-            // printf(", ");
-            // printf("%d", attr.y);
             XMoveResizeWindow(dpy, start.window,
                 attr.x + (start.button==1 ? xdiff : 0),
                 attr.y + (start.button==1 ? ydiff : 0),
@@ -197,13 +208,32 @@ int main()
 }
 
 // returns -1 if not found
+// column index is for shich window is the client (if is 'base' window then 1, if frame window then 2)
 int getClientIndex(Window client){
     for (unsigned int i=0;i<clients_amount;i++){
         int c_xid = (int) client;
         printf("\n [%d] client xid/frame : %d %d compare to %d \n", i, clients[i].xid, clients[i].frame_xid, c_xid);
         printf("found match : %d \n", clients[i].frame_xid == c_xid);
-        if (clients[i].xid == c_xid || clients[i].frame_xid == c_xid)
+        if (clients[i].xid == c_xid || clients[i].frame_xid == c_xid){
             return i;
+        }
+    }
+    return -1;
+}
+
+int getClientIndexWithColumnIndex(Window client, int *column_index){
+    int client_index;
+    if ((client_index = getClientIndex(client)) != -1){
+        int c_xid = (int) client;
+        if (clients[client_index].xid == c_xid){
+            printf("found on base window \n");
+            *column_index = BASEWINDOW;
+        }
+        else if (clients[client_index].frame_xid == c_xid){
+            printf("found on frame window \n");
+            *column_index = FRAMEWINDOW;
+        }
+        return 1;
     }
     return -1;
 }
