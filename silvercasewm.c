@@ -1,4 +1,7 @@
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/Xatom.h>
+#include <X11/extensions/Xrender.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +11,7 @@
 
 const unsigned int FRAME_OFFSET = 30;
 const unsigned int SELECTABLE_OFFSET = 15;
+const unsigned int MOVING_SELECTABLE_OFFSET = 40;
 const unsigned int BORDER_WIDTH = 5;
 const unsigned int BORDER_COLOR = 0xc8ffff;
 const unsigned int BG_COLOR = 0x00000000;
@@ -18,6 +22,10 @@ const unsigned int INITIAL_CLIENTS_SIZE = 5;
 typedef struct {
     int xid;
     int frame_xid;
+    int x;
+    int y;
+    int width;
+    int height;
 } Client;
 
 enum ClientColumn{
@@ -25,16 +33,34 @@ enum ClientColumn{
     FRAMEWINDOW
 };
 
-static Display *dpy;
-static Window root;
-static Client *clients;
-static int clients_amount = 0;
+Display *dpy;
+GC gc;
+int screen;
+
+Window root;
+int root_width;
+int root_height;
+
+Client *clients;
+int clients_amount = 0;
+int focused_client = 0;
+XButtonEvent last_pressed_event;
 
 int getClientIndex(Window client);
 int getClientIndexWithColumnIndex(Window client, int *column_index);
 
+void update_client(int client_index){
+    XWindowAttributes f_wa;
+    XGetWindowAttributes(dpy, clients[client_index].frame_xid, &f_wa);
+    clients[client_index].x = f_wa.x;
+    clients[client_index].y = f_wa.y;
+    clients[client_index].width = f_wa.width;
+    clients[client_index].height = f_wa.height;
+}
+
 void manage(Window w, XWindowAttributes *wa)
 {
+    XSelectInput(dpy, root, 0);
     XSetWindowBorderWidth(dpy, w, 0);
 
     int window_width = wa->width;
@@ -57,9 +83,11 @@ void manage(Window w, XWindowAttributes *wa)
 
     XReparentWindow(dpy, w, frame, FRAME_OFFSET/2,FRAME_OFFSET/2);
     XMapWindow(dpy, frame);
+    XSync(dpy, 0);
     
+    XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask, GrabModeSync, GrabModeAsync, None, None);
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
-    XSelectInput(dpy, w, SubstructureNotifyMask);
+    XSelectInput(dpy, frame, SubstructureNotifyMask);
 
     int add_to_index = clients_amount;
     for (int i=0;i<clients_amount;i++){
@@ -69,12 +97,16 @@ void manage(Window w, XWindowAttributes *wa)
         }
     }
     
-    clients[add_to_index] = (Client) {(int) w, (int) frame};
+    clients[add_to_index].xid = w;
+    clients[add_to_index].frame_xid = frame;
+    update_client(add_to_index);
+
     clients_amount += add_to_index == clients_amount ? 1 : 0;
     
-    printf("\n-----new client id %d \n", (int) w);
+    printf("    add new client : %d \n", (int) w);
+    printf("    all clients :\n");
     for (int i=0;i<clients_amount;i++){
-        printf("  [%d] = %d %d \n", i, clients[i].xid, clients[i].frame_xid);
+        printf("    --[%d] = w : %d, f : %d \n", i, clients[i].xid, clients[i].frame_xid);
     }
 }
 
@@ -85,8 +117,89 @@ void unmanage(int client_index){
     clients[client_index].frame_xid = 0;
 }
 
+void on_button_press(XButtonPressedEvent ev){
+    int client_index;
+    if ((client_index = getClientIndex(ev.window)) != -1){
+        XRaiseWindow(dpy, ev.window);
+
+        XWindowAttributes attr;
+        XGetWindowAttributes(dpy, ev.window, &attr);
+        if (
+            ev.x <= SELECTABLE_OFFSET||
+            ev.x >= attr.width - SELECTABLE_OFFSET||
+            ev.y <= SELECTABLE_OFFSET||
+            ev.y >= attr.height - SELECTABLE_OFFSET
+        ){
+            last_pressed_event = ev;
+            focused_client = client_index;
+        }
+    }
+    XAllowEvents(dpy, ReplayPointer, ev.time);
+    // XSync(dpy, 1);
+}
+
+void on_button_release(XButtonReleasedEvent ev){
+    last_pressed_event.window = None;
+
+    XWindowAttributes wa;
+    XGetWindowAttributes(dpy, clients[focused_client].frame_xid, &wa);
+    clients[focused_client].x = wa.x;
+    clients[focused_client].y = wa.y;
+}
+
+void on_motion_notify(XButtonEvent ev){
+    printf("    is pressed? : %d\n", last_pressed_event.window != None);
+    printf("    is pressing border/frame? : ");
+    if (
+        last_pressed_event.window != None &&
+        (
+            ev.x <= MOVING_SELECTABLE_OFFSET||
+            ev.x >= clients[focused_client].width - MOVING_SELECTABLE_OFFSET||
+            ev.y <= MOVING_SELECTABLE_OFFSET||
+            ev.y >= clients[focused_client].height - MOVING_SELECTABLE_OFFSET
+        )
+    ){
+        printf("yes\n");
+        int xdiff = ev.x_root - last_pressed_event.x_root;
+        int ydiff = ev.y_root - last_pressed_event.y_root;
+        printf("    x,y root from ev : %d, %d\n", ev.x_root, ev.y_root);
+        printf("    x,y root from client : %d, %d\n", last_pressed_event.x_root, last_pressed_event.y_root);
+        printf("    x,y diff: %d, %d\n", xdiff, ydiff);
+        XMoveWindow(dpy, ev.window,
+            clients[focused_client].x + (last_pressed_event.button==1 ? xdiff : 0),
+            clients[focused_client].y + (last_pressed_event.button==1 ? ydiff : 0));
+    }
+    else{
+        printf("no\n");
+    }
+}
+
+void map_win(Window w){
+    printf("    map client %d \n", (int) w);
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(dpy, w, &wa) && ! wa.override_redirect && getClientIndex(w) == -1 && wa.map_state == IsViewable){
+        manage(w, &wa);
+    }
+}
+
+void unmap_win(Window w){
+    int client_index;
+    printf("    destroy client %d \n", (int) w);
+    if ((client_index = getClientIndex(w)) > -1){
+        unmanage(client_index);
+    }
+}
+
+void configure_win(Window w){
+    int client_index;
+    if (client_index = getClientIndex(w)){
+        update_client(client_index);
+    }
+}
+
 void scan()
 {   
+    printf("---SCAN FOR WINDOWS\n");
     XGrabServer(dpy);
     unsigned int i, num_win;
     Window wroot, wparent;
@@ -95,22 +208,72 @@ void scan()
 
     if (XQueryTree(dpy, root, &wroot, &wparent, &wchildren, &num_win)){
         for(i=0;i<num_win;i++){
-            Window client_frame;
-            if (! XGetWindowAttributes(dpy, wchildren[i], &wa) || wa.override_redirect || getClientIndex(wchildren[i]) > -1){
-                // puts("scan failed");
-                continue;
-
-            }
-            if (wa.map_state == IsViewable)
-                // puts("scan success");
-                manage(wchildren[i], &wa);
+            map_win(wchildren[i]);
         }
         if (wchildren){
             XFree(wchildren);
         }
     }
-    // puts("scanning end");
     XUngrabServer(dpy);
+    printf("---SCAN COMPLETE\n\n");
+}
+
+void start(){
+    screen = DefaultScreen(dpy);
+    root = XDefaultRootWindow(dpy);
+    root_width = DisplayWidth(dpy, screen);
+    root_height = DisplayHeight(dpy, screen);
+    gc = XCreateGC(dpy, root, 0, NULL);
+
+    XFontStruct* font = XLoadQueryFont(dpy, "fixed");
+    XSetFont(dpy, gc,font->fid);
+    XSync(dpy, 0);
+}
+
+void run(){
+    XWindowAttributes attr;
+    XButtonEvent start;
+    XEvent ev;
+    start.window = None;
+    XSelectInput(dpy, root, SubstructureNotifyMask | StructureNotifyMask);
+
+    scan();
+    for(;;)
+    {
+        XNextEvent(dpy, &ev);
+
+        switch (ev.type)
+        {
+            case ButtonPress:
+                printf("---BUTTON PRESS\n");
+                on_button_press(ev.xbutton);
+                break;
+            case MotionNotify:
+                printf("---BUTTON MOTION\n");
+                on_motion_notify(ev.xbutton);
+                break;
+            case ButtonRelease:
+                printf("---BUTTON RELEASE\n");
+                on_button_release(ev.xbutton);
+                break;
+            case MapNotify:
+                puts("\n---MAP NOTIFY");
+                map_win(ev.xmap.window);
+                puts(" ");
+                break;
+            case UnmapNotify:
+                puts("\n---UNMAP NOTIFY");
+                unmap_win(ev.xunmap.window);
+                puts(" ");
+                break;
+            case ConfigureNotify:
+                puts("\n---CONFIGURE WINDOW");
+                configure_win(ev.xconfigure.window);
+            default:
+                printf("-----UNKNOWN EVENT----[%d]\n", ev.type);
+                break;
+        }
+    }
 }
 
 int main()
@@ -122,101 +285,27 @@ int main()
         return 1;
     }
 
-    // printf("\nstart");
-    // printf("%d", CreateNotify);
-    // printf("\nstart");
-    // printf("%d", MapNotify);
-    // printf("\nstart");
-    // printf("%d", CirculateNotify);
-    XWindowAttributes attr;
-    XButtonEvent start;
-    XEvent ev;
-
     if (! (dpy=XOpenDisplay(0x0)) ) return 1;
 
-    root = XDefaultRootWindow(dpy);
-    XSelectInput(dpy, root, SubstructureNotifyMask);
-
-    start.window = None;
-    scan();
-
-    for(;;)
-    {
-        XNextEvent(dpy, &ev);
-
-        if (ev.type != ButtonPress && ev.type != MotionNotify && ev.type != ButtonRelease){
-            printf("-----EVENT: %d-----\n\n", ev.type);
-        }
-        switch (ev.type)
-        {
-            case MapNotify:
-                puts("map notify");
-                printf("  map client %d \n", (int) ev.xcreatewindow.window);
-                XWindowAttributes wa;
-                XGetWindowAttributes(dpy, ev.xcreatewindow.window, &wa);
-                if (! wa.override_redirect && getClientIndex(ev.xcreatewindow.window) == -1){
-                    manage(ev.xcreatewindow.window, &wa);
-                }
-                break;
-            case DestroyNotify:
-                int client_index;
-                puts("destroy notify");
-                printf(" destroy client %d \n", (int) ev.xdestroywindow.event);
-                if ((client_index = getClientIndex(ev.xdestroywindow.event)) > -1){
-                    unmanage(client_index);
-                }
-            default:
-                
-                break;
-        }
-
-        if(ev.type == ButtonPress && ev.xbutton.window != None)
-        {
-            int client_index;
-            XWindowAttributes wa;
-            XGetWindowAttributes(dpy, ev.xbutton.window, &wa);
-            if ((client_index = getClientIndex(ev.xbutton.window)) != -1 &&
-                (
-                    ev.xbutton.x <= SELECTABLE_OFFSET||
-                    ev.xbutton.x >= wa.width - SELECTABLE_OFFSET||
-                    ev.xbutton.y <= SELECTABLE_OFFSET||
-                    ev.xbutton.y >= wa.height - SELECTABLE_OFFSET
-                )
-            ){
-                XRaiseWindow(dpy, ev.xbutton.window);
-                XGetWindowAttributes(dpy, ev.xbutton.window, &attr);
-                start = ev.xbutton;
-            }
-        }
-        else if(ev.type == MotionNotify && start.window != None)
-        {
-            int xdiff = ev.xbutton.x_root - start.x_root;
-            int ydiff = ev.xbutton.y_root - start.y_root;
-            XMoveResizeWindow(dpy, start.window,
-                attr.x + (start.button==1 ? xdiff : 0),
-                attr.y + (start.button==1 ? ydiff : 0),
-                MAX(1, attr.width + (start.button==3 ? xdiff : 0)),
-                MAX(1, attr.height + (start.button==3 ? ydiff : 0)));
-        }
-        else if(ev.type == ButtonRelease)
-            start.window = None;
-        
-        XSync(dpy, 1);
-
-
-    }
+    start();
+    run();
+    XCloseDisplay(dpy);
+    return 1;
+    
 }
 
 // returns -1 if not found
 // column index is for shich window is the client (if is 'base' window then 1, if frame window then 2)
 int getClientIndex(Window client){
+    int c_xid = (int) client;
+    printf("    search for %d\n", c_xid);
     for (unsigned int i=0;i<clients_amount;i++){
-        int c_xid = (int) client;
-        printf("\n [%d] client xid/frame : %d %d compare to %d \n", i, clients[i].xid, clients[i].frame_xid, c_xid);
-        printf("found match : %d \n", clients[i].frame_xid == c_xid);
+        printf("    --[%d] w: %d f: %d", i, clients[i].xid, clients[i].frame_xid);
         if (clients[i].xid == c_xid || clients[i].frame_xid == c_xid){
+            printf(" == %d [found]\n", c_xid);
             return i;
         }
+        printf(" != %d\n", c_xid);
     }
     return -1;
 }
