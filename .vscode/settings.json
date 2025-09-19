@@ -49,6 +49,9 @@
         "text_encoding": "c",
         "cinttypes": "c",
         "typeinfo": "c",
-        "variant": "c"
+        "variant": "c",
+        "xatom.h": "c",
+        "stdio.h": "c",
+        "xrender.h": "c"
     }
 }
