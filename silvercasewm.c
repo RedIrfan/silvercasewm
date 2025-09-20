@@ -27,6 +27,7 @@ typedef struct {
     int y;
     int width;
     int height;
+    int reparenting;
 } Client;
 
 enum ClientColumn{
@@ -62,7 +63,6 @@ void update_client(int client_index){
 
 void manage(Window w, XWindowAttributes *wa)
 {
-    XSelectInput(dpy, root, 0);
     XSetWindowBorderWidth(dpy, w, 0);
 
     int window_width = wa->width;
@@ -84,9 +84,6 @@ void manage(Window w, XWindowAttributes *wa)
     XAddToSaveSet(dpy, w);
 
     XReparentWindow(dpy, w, frame, FRAME_OFFSET/2,FRAME_OFFSET/2);
-    XMapWindow(dpy, frame);
-    XSync(dpy, 0);
-    
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask, GrabModeSync, GrabModeAsync, None, None);
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
     XSelectInput(dpy, frame, SubstructureNotifyMask);
@@ -101,6 +98,7 @@ void manage(Window w, XWindowAttributes *wa)
     
     clients[add_to_index].xid = w;
     clients[add_to_index].frame_xid = frame;
+    clients[add_to_index].reparenting = 1;
     update_client(add_to_index);
 
     clients_amount += add_to_index == clients_amount ? 1 : 0;
@@ -110,6 +108,9 @@ void manage(Window w, XWindowAttributes *wa)
     for (int i=0;i<clients_amount;i++){
         printf("    --[%d] = w : %d, f : %d \n", i, clients[i].xid, clients[i].frame_xid);
     }
+
+    XMapWindow(dpy, frame);
+    XSync(dpy, 0);
 }
 
 void unmanage(int client_index){
@@ -174,6 +175,13 @@ void on_motion_notify(XButtonEvent ev){
     }
 }
 
+void on_reparenting(Window w){
+    int client_index = getClientIndex(w);
+    if (client_index > -1){
+        clients[client_index].reparenting = 0;
+    }
+}
+
 void map_win(Window w){
     printf("    map client %d \n", (int) w);
     XWindowAttributes wa;
@@ -191,10 +199,10 @@ void unmap_win(Window w){
 }
 
 void configure_win(Window w){
-    int client_index;
-    if ((client_index = getClientIndex(w)) != -1){
-        update_client(client_index);
-    }
+    // int client_index;
+    // if ((client_index = getClientIndex(w)) != -1){
+    //     update_client(client_index);
+    // }
 }
 
 void scan()
@@ -235,7 +243,7 @@ void run(){
     XButtonEvent start;
     XEvent ev;
     start.window = None;
-    XSelectInput(dpy, root, SubstructureNotifyMask | StructureNotifyMask);
+    XSelectInput(dpy, root, SubstructureNotifyMask);
 
     scan();
     for(;;)
@@ -246,7 +254,15 @@ void run(){
         {
             case CreateNotify:
                 puts("\n---CREATE NOTIFY");
-                map_win(ev.xcreatewindow.window);
+                // map_win(ev.xcreatewindow.window);
+                break;
+            case ReparentNotify:
+                puts("\n---REPARENTING");
+                on_reparenting(ev.xreparent.window);
+                break;
+            case ConfigureNotify:
+                puts("\n---CONFIGURE WINDOW");
+                configure_win(ev.xconfigure.window);
                 break;
             case MapNotify:
                 puts("\n---MAP NOTIFY");
@@ -255,7 +271,9 @@ void run(){
                 break;
             case UnmapNotify:
                 puts("\n---UNMAP NOTIFY");
-                unmap_win(ev.xunmap.window);
+                int client_index = getClientIndex(ev.xunmap.window);
+                if (client_index != -1 && clients[client_index].reparenting == 0)
+                    unmap_win(ev.xunmap.window);
                 puts(" ");
                 break;
             case ButtonPress:
@@ -269,10 +287,6 @@ void run(){
             case ButtonRelease:
                 printf("---BUTTON RELEASE\n");
                 on_button_release(ev.xbutton);
-                break;
-            case ConfigureNotify:
-                puts("\n---CONFIGURE WINDOW");
-                configure_win(ev.xconfigure.window);
                 break;
             default:
                 printf("-----UNKNOWN EVENT----[%d]\n", ev.type);
