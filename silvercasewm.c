@@ -53,6 +53,7 @@ int getClientIndexWithColumnIndex(Window client, int *column_index);
 void update_client(int client_index){
     XWindowAttributes f_wa;
     XGetWindowAttributes(dpy, clients[client_index].frame_xid, &f_wa);
+    
     clients[client_index].x = f_wa.x;
     clients[client_index].y = f_wa.y;
     clients[client_index].width = f_wa.width;
@@ -155,13 +156,11 @@ void on_motion_notify(XButtonEvent ev){
         last_pressed_event.window != None
     ){
         printf("yes\n");
-        int constrained_ev_x = MAX(ev.x_root, last_pressed_event.x);
-        constrained_ev_x = MIN(constrained_ev_x, root_width - (clients[focused_client].width - last_pressed_event.x));
-        int constrained_ev_y = MAX(ev.y_root, last_pressed_event.y);
-        constrained_ev_y = MIN(constrained_ev_y, root_height - (clients[focused_client].height - last_pressed_event.y));
+        int constrained_x = MIN(MAX(ev.x_root, FRAME_OFFSET), root_width-FRAME_OFFSET);
+        int constrained_y = MIN(MAX(ev.y_root, FRAME_OFFSET), root_height-FRAME_OFFSET);
         
-        int xdiff = constrained_ev_x - last_pressed_event.x_root;
-        int ydiff = constrained_ev_y - last_pressed_event.y_root;
+        int xdiff = constrained_x - last_pressed_event.x_root;
+        int ydiff = constrained_y - last_pressed_event.y_root;
         printf("    x,y root from ev : %d, %d\n", ev.x_root, ev.y_root);
         printf("    x,y root from client : %d, %d\n", last_pressed_event.x_root, last_pressed_event.y_root);
         printf("    x,y diff: %d, %d\n", xdiff, ydiff);
@@ -193,7 +192,7 @@ void unmap_win(Window w){
 
 void configure_win(Window w){
     int client_index;
-    if (client_index = getClientIndex(w)){
+    if ((client_index = getClientIndex(w)) != -1){
         update_client(client_index);
     }
 }
@@ -228,7 +227,7 @@ void start(){
 
     XFontStruct* font = XLoadQueryFont(dpy, "fixed");
     XSetFont(dpy, gc,font->fid);
-    XSync(dpy, 0);
+    // XSync(dpy, 0);
 }
 
 void run(){
@@ -245,6 +244,20 @@ void run(){
 
         switch (ev.type)
         {
+            case CreateNotify:
+                puts("\n---CREATE NOTIFY");
+                map_win(ev.xcreatewindow.window);
+                break;
+            case MapNotify:
+                puts("\n---MAP NOTIFY");
+                map_win(ev.xmap.window);
+                puts(" ");
+                break;
+            case UnmapNotify:
+                puts("\n---UNMAP NOTIFY");
+                unmap_win(ev.xunmap.window);
+                puts(" ");
+                break;
             case ButtonPress:
                 printf("---BUTTON PRESS\n");
                 on_button_press(ev.xbutton);
@@ -257,23 +270,17 @@ void run(){
                 printf("---BUTTON RELEASE\n");
                 on_button_release(ev.xbutton);
                 break;
-            case MapNotify:
-                puts("\n---MAP NOTIFY");
-                map_win(ev.xmap.window);
-                puts(" ");
-                break;
-            case UnmapNotify:
-                puts("\n---UNMAP NOTIFY");
-                unmap_win(ev.xunmap.window);
-                puts(" ");
-                break;
             case ConfigureNotify:
                 puts("\n---CONFIGURE WINDOW");
                 configure_win(ev.xconfigure.window);
+                break;
             default:
                 printf("-----UNKNOWN EVENT----[%d]\n", ev.type);
                 break;
         }
+
+        // scan();
+        XSync(dpy, 0);
     }
 }
 
