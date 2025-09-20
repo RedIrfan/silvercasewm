@@ -16,8 +16,10 @@ const unsigned int MOVING_SELECTABLE_OFFSET = 40;
 const unsigned int BORDER_WIDTH = 5;
 const unsigned int BORDER_COLOR = 0xc8ffff;
 const unsigned int BG_COLOR = 0x00000000;
-const unsigned int BUTTON_WIDTH = 4;
+const unsigned int BUTTON_WIDTH = 20;
 const unsigned int BUTTON_COLOR = 0xffffff;
+const unsigned int BUTTON_BORDER_WIDTH = 2;
+const unsigned int BUTTON_BORDER_COLOR = 0x000000;
 const unsigned int INITIAL_CLIENTS_SIZE = 5;
 
 typedef struct {
@@ -81,11 +83,52 @@ void manage(Window w, XWindowAttributes *wa)
         BG_COLOR
     );
 
-    XAddToSaveSet(dpy, w);
+    int btn_initial_pos = wa->x + (wa->width - (FRAME_OFFSET/2));
+    int btn_y_pos = wa->y - ((BUTTON_WIDTH/2) + BORDER_WIDTH);
+    const Window erase_btn = XCreateSimpleWindow(
+        dpy, frame,
+        btn_initial_pos,
+        btn_y_pos,
+        BUTTON_WIDTH,
+        BUTTON_WIDTH,
+        BUTTON_BORDER_WIDTH,
+        BUTTON_BORDER_COLOR,
+        BUTTON_COLOR
+    );
+    const Window maximize_btn = XCreateSimpleWindow(
+        dpy, frame,
+        btn_initial_pos - BUTTON_WIDTH,
+        btn_y_pos,
+        BUTTON_WIDTH,
+        BUTTON_WIDTH,
+        BUTTON_BORDER_WIDTH,
+        BUTTON_BORDER_COLOR,
+        BUTTON_COLOR
+    );
+    const Window minimize_btn = XCreateSimpleWindow(
+        dpy, frame,
+        btn_initial_pos - (BUTTON_WIDTH*2),
+        btn_y_pos,
+        BUTTON_WIDTH,
+        BUTTON_WIDTH,
+        BUTTON_BORDER_WIDTH,
+        BUTTON_BORDER_COLOR,
+        BUTTON_COLOR
+    );
 
+    // XSelectInput(dpy, root, 0);
+    XAddToSaveSet(dpy, w);
+    
     XReparentWindow(dpy, w, frame, FRAME_OFFSET/2,FRAME_OFFSET/2);
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask, GrabModeSync, GrabModeAsync, None, None);
     XGrabButton(dpy, 1, AnyModifier, frame, True, ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
+    
+    XMapWindow(dpy, erase_btn);
+    XMapWindow(dpy, maximize_btn);
+    XMapWindow(dpy, minimize_btn);
+    XMapWindow(dpy, frame);
+    XSync(dpy, 0);
+
     XSelectInput(dpy, frame, SubstructureNotifyMask);
 
     int add_to_index = clients_amount;
@@ -108,9 +151,6 @@ void manage(Window w, XWindowAttributes *wa)
     for (int i=0;i<clients_amount;i++){
         printf("    --[%d] = w : %d, f : %d \n", i, clients[i].xid, clients[i].frame_xid);
     }
-
-    XMapWindow(dpy, frame);
-    XSync(dpy, 0);
 }
 
 void unmanage(int client_index){
@@ -147,7 +187,7 @@ void on_button_press(XButtonPressedEvent ev){
 
 void on_button_release(XButtonReleasedEvent ev){
     last_pressed_event.window = None;
-    
+
     if (focused_client < clients_amount){
         update_client(focused_client);
     }
