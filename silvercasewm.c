@@ -7,6 +7,7 @@
 #include <string.h>
 
 #define ARRAY_SIZE(arr)  (sizeof(arr) / sizeof((arr)[0]))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 const unsigned int FRAME_OFFSET = 30;
@@ -133,6 +134,9 @@ void on_button_press(XButtonPressedEvent ev){
             last_pressed_event = ev;
             focused_client = client_index;
         }
+        else{
+            last_pressed_event.window = None;
+        }
     }
     XAllowEvents(dpy, ReplayPointer, ev.time);
     // XSync(dpy, 1);
@@ -141,30 +145,27 @@ void on_button_press(XButtonPressedEvent ev){
 void on_button_release(XButtonReleasedEvent ev){
     last_pressed_event.window = None;
 
-    XWindowAttributes wa;
-    XGetWindowAttributes(dpy, clients[focused_client].frame_xid, &wa);
-    clients[focused_client].x = wa.x;
-    clients[focused_client].y = wa.y;
+    update_client(focused_client);
 }
 
 void on_motion_notify(XButtonEvent ev){
     printf("    is pressed? : %d\n", last_pressed_event.window != None);
-    printf("    is pressing border/frame? : ");
+    printf("    is not constrained? : ");
     if (
-        last_pressed_event.window != None &&
-        (
-            ev.x <= MOVING_SELECTABLE_OFFSET||
-            ev.x >= clients[focused_client].width - MOVING_SELECTABLE_OFFSET||
-            ev.y <= MOVING_SELECTABLE_OFFSET||
-            ev.y >= clients[focused_client].height - MOVING_SELECTABLE_OFFSET
-        )
+        last_pressed_event.window != None
     ){
         printf("yes\n");
-        int xdiff = ev.x_root - last_pressed_event.x_root;
-        int ydiff = ev.y_root - last_pressed_event.y_root;
+        int constrained_ev_x = MAX(ev.x_root, last_pressed_event.x);
+        constrained_ev_x = MIN(constrained_ev_x, root_width - (clients[focused_client].width - last_pressed_event.x));
+        int constrained_ev_y = MAX(ev.y_root, last_pressed_event.y);
+        constrained_ev_y = MIN(constrained_ev_y, root_height - (clients[focused_client].height - last_pressed_event.y));
+        
+        int xdiff = constrained_ev_x - last_pressed_event.x_root;
+        int ydiff = constrained_ev_y - last_pressed_event.y_root;
         printf("    x,y root from ev : %d, %d\n", ev.x_root, ev.y_root);
         printf("    x,y root from client : %d, %d\n", last_pressed_event.x_root, last_pressed_event.y_root);
         printf("    x,y diff: %d, %d\n", xdiff, ydiff);
+
         XMoveWindow(dpy, ev.window,
             clients[focused_client].x + (last_pressed_event.button==1 ? xdiff : 0),
             clients[focused_client].y + (last_pressed_event.button==1 ? ydiff : 0));
