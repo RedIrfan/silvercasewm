@@ -118,6 +118,7 @@ void unmanage(int client_index){
     
     clients[client_index].xid = 0;
     clients[client_index].frame_xid = 0;
+    clients_amount -= 1;
 }
 
 void on_button_press(XButtonPressedEvent ev){
@@ -146,8 +147,10 @@ void on_button_press(XButtonPressedEvent ev){
 
 void on_button_release(XButtonReleasedEvent ev){
     last_pressed_event.window = None;
-
-    update_client(focused_client);
+    
+    if (focused_client < clients_amount){
+        update_client(focused_client);
+    }
 }
 
 void on_motion_notify(XButtonEvent ev){
@@ -193,7 +196,7 @@ void map_win(Window w){
 void unmap_win(Window w){
     int client_index;
     printf("    destroy client %d \n", (int) w);
-    if ((client_index = getClientIndex(w)) > -1){
+    if ((client_index = getClientIndex(w)) > -1 && clients[client_index].reparenting == 0){
         unmanage(client_index);
     }
 }
@@ -271,9 +274,7 @@ void run(){
                 break;
             case UnmapNotify:
                 puts("\n---UNMAP NOTIFY");
-                int client_index = getClientIndex(ev.xunmap.window);
-                if (client_index != -1 && clients[client_index].reparenting == 0)
-                    unmap_win(ev.xunmap.window);
+                unmap_win(ev.xunmap.window);
                 puts(" ");
                 break;
             case ButtonPress:
